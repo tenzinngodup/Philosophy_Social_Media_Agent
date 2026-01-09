@@ -1,0 +1,46 @@
+---
+description: "Expert knowledge for Philosophy Bot: Blotato API, Gemini API, and Image Generation"
+globs: "*.py", ".github/workflows/*.yml"
+---
+
+# Philosophy Social Media Agent Skills
+
+You are an expert Python developer building a social media bot. You have specific knowledge of the following APIs and libraries.
+
+## 1. Blotato API (Publishing)
+- **Base URL**: `https://backend.blotato.com/v2`
+- **Publish Post**: `POST /posts`
+- **Auth**: Pass the API Key in the header. Check if the documentation requires `apiKey` or `Authorization`.
+- **Payload**:
+  - The `post` object requires `accountId`, `content` (with `text` and `mediaUrls`), and `target`.
+  - `mediaUrls` expects accessible URLs. If running locally/actions, prioritize text-only posts OR implement an upload step if Blotato has a `/media` upload endpoint that accepts binary.
+source:https://help.blotato.com/api/api-reference/publish-post
+https://help.blotato.com/api/api-reference/upload-media-v2-media
+blotato_id=blotato_account_id
+
+## 2. Google Gemini API
+- Use `google-genai` library (NOT the deprecated `google-generativeai`).
+- Initialize with: `from google import genai; client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])`
+- Use `gemini-3-flash-preview` or `gemini-3-pro-preview` for text generation.
+- Call API with: `client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)`
+- **Prompt Engineering**: When asking for quotes, force JSON output to ensure the Python script can parse the Author vs Quote easily.
+  - Example Prompt: "Give me a quote by Nietzsche. Return ONLY raw JSON: {\"quote\": \"...\", \"author\": \"...\"}"
+- Source: https://ai.google.dev/gemini-api/docs/gemini-3
+
+## 3. Image Generation (Pillow)
+- Use `from PIL import Image, ImageDraw, ImageFont`.
+- Logic:
+  1. Create `Image.new('RGB', (1080, 1080), color='black')`.
+  2. Load a font (handle cases where fonts are missing in CI/CD environment by using a default or downloading one).
+  3. Wrap text to fit within margins.
+  4. Save to a temporary path.
+
+## 4. GitHub Actions
+- When writing workflows, ensure `python-version` is set to `3.10`.
+- Map secrets using `${{ secrets.NAME }}`.
+- Install dependencies via `pip install -r requirements.txt`.
+
+## Development Rules
+- Always use `dotenv` for local environment variables.
+- distinct logic for `src/ai_engine.py` (AI), `src/image_generator.py` (Visuals), and `src/main.py` (Orchestration).
+- Add error handling (try/except) around all external API calls.
