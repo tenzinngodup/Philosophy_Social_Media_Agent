@@ -9,7 +9,7 @@ on:
 jobs:
   post-philosophy-quote:
     runs-on: ubuntu-latest
-    environment: production  # Change this to match your environment name if different
+    environment: social_bot  # Change this to match your environment name if different
     
     steps:
       - name: Checkout repository
@@ -22,8 +22,8 @@ jobs:
       
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip3 install --upgrade pip
+          pip3 install -r requirements.txt
       
       - name: Run philosophy bot
         env:
@@ -31,4 +31,4 @@ jobs:
           BLOTATO_API_KEY: ${{ secrets.BLOTATO_API_KEY }}
           BLOTATO_ACCOUNT_ID: ${{ secrets.BLOTATO_ACCOUNT_ID }}
         run: |
-          python run.py
+          python3 run.py
