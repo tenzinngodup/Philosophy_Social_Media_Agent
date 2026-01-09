@@ -9,6 +9,7 @@ on:
 jobs:
   post-philosophy-quote:
     runs-on: ubuntu-latest
+    environment: production  # Change this to match your environment name if different
     
     steps:
       - name: Checkout repository
