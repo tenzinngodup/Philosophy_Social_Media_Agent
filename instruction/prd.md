@@ -16,10 +16,10 @@ Here is a complete **Product Requirements Document (PRD)** tailored for use with
 
 ## 2. Tech Stack
 *   **Language:** Python 3.10+
-*   **AI Model:** Google Gemini API (`google-generativeai` SDK)
+*   **AI Model:** Google Gemini API (`google-genai` SDK) - Use Gemini 3 Flash
 *   **Image Processing:** Pillow (`PIL`)
 *   **Social Publishing:** Blotato API
-*   **Infrastructure:** GitHub Actions (Workflow)
+*   **Infrastructure:** GitHub Actions (Workflow) with Environment Secrets
 *   **Environment Management:** `dotenv`
 
 ## 3. Architecture & File Structure
@@ -42,6 +42,8 @@ philosophy-bot/
 │   └── templates/              # Background images for quotes
 ├── requirements.txt
 ├── .env.example
+├── .gitignore                  # Protects .env file
+├── run.py                      # Entry point script
 └── PRD.md
 ```
 
@@ -50,9 +52,13 @@ philosophy-bot/
 ### 4.1. AI Engine (`src/ai_engine.py`)
 *   **Input:** Topic (optional) or "Random".
 *   **Logic:**
-    *   Call Google Gemini API.
-    *   Prompt: "Generate a profound quote from a famous Western philosopher (e.g., Marcus Aurelius, Nietzsche, Seneca, Kant). Output JSON with `quote`, `author`, and `short_context`."
+    *   Use `google-genai` package (NOT deprecated `google-generativeai`).
+    *   Initialize: `client = genai.Client(api_key=api_key)`
+    *   Model: `gemini-3-flash-preview` (or `gemini-3-pro-preview` for advanced reasoning).
+    *   Call: `client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)`
+    *   Prompt: "Generate a profound quote from a famous Western philosopher. Return ONLY raw JSON: `{ "quote": "...", "author": "...", "context": "..." }`"
 *   **Output:** JSON object `{ "quote": "...", "author": "...", "context": "..." }`.
+*   **API Docs:** https://ai.google.dev/gemini-api/docs/gemini-3
 
 ### 4.2. Image Generator (`src/image_generator.py`)
 *   **Input:** Quote text, Author name.
@@ -64,31 +70,54 @@ philosophy-bot/
 
 ### 4.3. Blotato Client (`src/blotato_client.py`)
 *   **Endpoint:** `POST https://backend.blotato.com/v2/posts`
-*   **Authentication:** API Key (Header: `x-api-key` or `apiKey` - *Verify in Dashboard*).
-*   **Logic:**
-    *   **Upload Media:** If Blotato requires uploading first, use the `/media` endpoint. *Note: Blotato v2 often allows passing public URLs. Since we generate images locally in GitHub Actions, we might need to upload to a temporary host or use Blotato's base64/upload capability if supported.*
-    *   *Workaround for Local Images:* Send the image as a `base64` string or binary upload if the API supports it. If Blotato strictly requires a URL, we may need to use a simple image host or commit the image to a generic "latest" branch (less ideal).
-    *   *Refined Plan:* Use Blotato's "Upload Media" endpoint if it accepts binary/multipart, otherwise, we will post *text only* for v1 and upgrade to images if a public URL is available.
-    *   **Payload Construction:**
-        ```json
-        {
-          "post": {
-            "accountId": "<BLOTATO_ACCOUNT_ID>",
-            "content": {
-              "text": "Quote of the day by {author}...\n\n{quote}",
-              "mediaUrls": ["<UPLOADED_MEDIA_URL>"],
-              "platform": "twitter"
-            }
-          }
+*   **Authentication:** Header `Authorization: Bearer <API_KEY>` (NOT `apiKey` header).
+*   **Media Upload:** Blotato `/v2/media` endpoint requires public URLs (not multipart/form-data). For local images, upload to hosting service first or post text-only.
+*   **Payload Structure:**
+    ```json
+    {
+      "post": {
+        "accountId": "<BLOTATO_ACCOUNT_ID>",
+        "content": {
+          "text": "Quote text here",
+          "mediaUrls": [],  // REQUIRED field (empty array for text-only)
+          "platform": "twitter"
+        },
+        "target": {
+          "targetType": "twitter"  // Use targetType, not platform
         }
-        ```
+      }
+    }
+    ```
+*   **API Docs:** 
+    *   Publish: https://help.blotato.com/api/api-reference/publish-post
+    *   Media: https://help.blotato.com/api/api-reference/upload-media-v2-media
 
 ### 4.4. Automation (`.github/workflows/daily_post.yml`)
-*   **Trigger:** Schedule (`cron: '0 14 * * *'`) - Runs daily at 2 PM UTC.
-*   **Secrets Needed:**
-    *   `GEMINI_API_KEY`
-    *   `BLOTATO_API_KEY`
-    *   `BLOTATO_ACCOUNT_ID`
+*   **Trigger:** Schedule (`cron: '0 14 * * *'`) - Runs daily at 2 PM UTC. Also supports manual trigger.
+*   **Environment Secrets Setup:**
+    1. Go to: Repository Settings → Environments → Create environment (e.g., `social_bot`)
+    2. Add secrets to environment (NOT repository secrets):
+       *   `GEMINI_API_KEY`
+       *   `BLOTATO_API_KEY`
+       *   `BLOTATO_ACCOUNT_ID`
+*   **Workflow Configuration:**
+    ```yaml
+    jobs:
+      job-name:
+        runs-on: ubuntu-latest
+        environment: social_bot  # Matches environment name
+        steps:
+          - uses: actions/checkout@v4
+          - uses: actions/setup-python@v4
+            with:
+              python-version: '3.10'
+          - run: pip3 install -r requirements.txt
+          - run: python3 run.py
+            env:
+              GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+              BLOTATO_API_KEY: ${{ secrets.BLOTATO_API_KEY }}
+              BLOTATO_ACCOUNT_ID: ${{ secrets.BLOTATO_ACCOUNT_ID }}
+    ```
 
 ## 5. Implementation Guide (For Cursor)
 
@@ -105,33 +134,26 @@ Open Cursor Chat and type:
 
 ## 6. API Schemas (Context for Cursor)
 
-### Blotato Publish Endpoint
-*   **URL:** `https://backend.blotato.com/v2/posts`
-*   **Method:** `POST`
-*   **Headers:** `Content-Type: application/json`, `apiKey: <YOUR_KEY>`
-*   **Body:**
-    ```json
-    {
-      "post": {
-        "accountId": "string (Required)",
-        "content": {
-          "text": "string (Required)",
-          "mediaUrls": ["string (Public URL)"],
-          "platform": "twitter"
-        },
-        "target": { "platform": "twitter" }
-      }
-    }
-    ```
+### Blotato API
+*   **Publish Endpoint:** `POST https://backend.blotato.com/v2/posts`
+*   **Headers:** `Content-Type: application/json`, `Authorization: Bearer <API_KEY>`
+*   **Required Fields:** `accountId`, `content.text`, `content.mediaUrls` (array, can be empty), `target.targetType`
+*   **Docs:** https://help.blotato.com/api/api-reference/publish-post
 
-### Google Gemini Python SDK
-```python
-import google.generativeai as genai
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-model = genai.GenerativeModel('gemini-pro')
-response = model.generate_content("Your prompt here")
-print(response.text)
-```
+### Google Gemini API
+*   **Package:** `google-genai` (install: `pip install google-genai`)
+*   **Model:** `gemini-3-flash-preview` (fast, cost-effective) or `gemini-3-pro-preview` (advanced reasoning)
+*   **Usage:**
+    ```python
+    from google import genai
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    response = client.models.generate_content(
+        model="gemini-3-flash-preview",
+        contents="Your prompt here"
+    )
+    print(response.text)
+    ```
+*   **Docs:** https://ai.google.dev/gemini-api/docs/gemini-3
 
 ---
 
@@ -151,21 +173,21 @@ You are an expert Python developer building a social media bot. You have specifi
 ## 1. Blotato API (Publishing)
 - **Base URL**: `https://backend.blotato.com/v2`
 - **Publish Post**: `POST /posts`
-- **Auth**: Pass the API Key in the header. Check if the documentation requires `apiKey` or `Authorization`.
+- **Auth**: Header `Authorization: Bearer <API_KEY>` (NOT `apiKey` header)
 - **Payload**:
-  - The `post` object requires `accountId`, `content` (with `text` and `mediaUrls`), and `target`.
-  - `mediaUrls` expects accessible URLs. If running locally/actions, prioritize text-only posts OR implement an upload step if Blotato has a `/media` upload endpoint that accepts binary.
-source:https://help.blotato.com/api/api-reference/publish-post
-https://help.blotato.com/api/api-reference/upload-media-v2-media
-blotato_id=blotato_account_id
+  - Required: `accountId`, `content.text`, `content.mediaUrls` (array, required even if empty), `target.targetType`
+  - `mediaUrls` must be public URLs. For local images, upload to hosting service first.
+- **Sources**: 
+  - https://help.blotato.com/api/api-reference/publish-post
+  - https://help.blotato.com/api/api-reference/upload-media-v2-media
 
 ## 2. Google Gemini API
-- Use `google-generativeai` library.
-- Always use `genai.configure(api_key=os.environ["GEMINI_API_KEY"])`.
-- Use `gemini-pro` (or latest flash model) for text generation.
-- **Prompt Engineering**: When asking for quotes, force JSON output to ensure the Python script can parse the Author vs Quote easily.
-  - Example Prompt: "Give me a quote by Nietzsche. Return ONLY raw JSON: {\"quote\": \"...\", \"author\": \"...\"}"
-use source: https://ai.google.dev/gemini-api/docs/gemini-3
+- **Package**: `google-genai` (NOT deprecated `google-generativeai`)
+- **Initialize**: `client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])`
+- **Model**: `gemini-3-flash-preview` (default) or `gemini-3-pro-preview`
+- **Call**: `client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)`
+- **Prompt Engineering**: Force JSON output: "Return ONLY raw JSON: {\"quote\": \"...\", \"author\": \"...\"}"
+- **Source**: https://ai.google.dev/gemini-api/docs/gemini-3
 
 ## 3. Image Generation (Pillow)
 - Use `from PIL import Image, ImageDraw, ImageFont`.
@@ -176,9 +198,13 @@ use source: https://ai.google.dev/gemini-api/docs/gemini-3
   4. Save to a temporary path.
 
 ## 4. GitHub Actions
-- When writing workflows, ensure `python-version` is set to `3.10`.
-- Map secrets using `${{ secrets.NAME }}`.
-- Install dependencies via `pip install -r requirements.txt`.
+- Use `python-version: '3.10'` and explicit `python3`/`pip3` commands.
+- Use **Environment Secrets** (not repository secrets):
+  - Create environment in repo settings (e.g., `social_bot`)
+  - Add secrets to environment
+  - Reference in workflow: `environment: social_bot`
+  - Access secrets: `${{ secrets.NAME }}` (automatically uses environment secrets)
+- Install dependencies: `pip3 install -r requirements.txt`
 
 ## Development Rules
 - Always use `dotenv` for local environment variables.
